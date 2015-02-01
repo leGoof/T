@@ -20,6 +20,9 @@ type Buffer struct {
 	runes *runes.Buffer
 	lock  sync.Mutex
 	eds   []*Editor
+	// Seq is a monotonically increasing number
+	// that can be used to identify each change to the buffer.
+	seq int32
 }
 
 // NewBuffer returns a new, empty buffer.
