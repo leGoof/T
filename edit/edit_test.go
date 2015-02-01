@@ -390,6 +390,61 @@ func TestEditorSubstitute(t *testing.T) {
 	}
 }
 
+func TestEditorUndo(t *testing.T) {
+	tests := []multiEditTest{
+		{
+			{edit: "a/Hello, World!", want: "Hello, World!"},
+			{edit: "u", want: ""},
+			{edit: ".a/dot", want: "dot"}, // Check that dot is set correctly.
+		},
+		{
+			{edit: "a/Hello", want: "Hello"},
+			{edit: ".a/, World!", want: "Hello, World!"},
+			{edit: "u", want: "Hello"},
+			{edit: ".a/dot", want: "Hellodot"},
+		},
+		{
+			{edit: "a/Hello, World!", want: "Hello, World!"},
+			{edit: "/, World/d", want: "Hello!"},
+			{edit: "u", want: "Hello, World!"},
+			{edit: ".d", want: "Hello!"},
+		},
+		{
+			{edit: "a/Hello", want: "Hello"},
+			{edit: ".a/, World!", want: "Hello, World!"},
+			{edit: "u", want: "Hello"},
+			{edit: "u", want: ""},
+			{edit: ".a/dot", want: "dot"},
+		},
+		{
+			{edit: "a/Hello, World!", want: "Hello, World!"},
+			{edit: "/, World/d", want: "Hello!"},
+			{edit: ".a/, 世界", want: "Hello, 世界!"},
+			{edit: "u", want: "Hello!"},
+			{edit: "/Hello/a/, World", want: "Hello, World!"},
+			{edit: "u", want: "Hello!"},
+			{edit: "u", want: "Hello, World!"},
+			{edit: ".d", want: "Hello!"},
+			{edit: "u", want: "Hello, World!"},
+			{edit: "u", want: ""},
+			{edit: ".a/dot", want: "dot"},
+		},
+		{
+			{edit: "a/H", want: "H"},
+			{edit: ".a/e", want: "He"},
+			{edit: ".a/l", want: "Hel"},
+			{edit: ".a/l", want: "Hell"},
+			{edit: ".a/o", want: "Hello"},
+			{edit: "u3", want: "He"},
+			{edit: "u 2", want: ""},
+			{edit: ".a/dot", want: "dot"},
+		},
+	}
+	for _, test := range tests {
+		test.run(t)
+	}
+}
+
 func TestConcurrentSimpleChanges(t *testing.T) {
 	tests := []multiEditTest{
 		{

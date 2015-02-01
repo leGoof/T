@@ -5,6 +5,7 @@ package edit
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"sync"
 	"unicode"
 
@@ -68,6 +69,7 @@ func (b *Buffer) change(r addr, rs []rune) error {
 	for _, e := range b.eds {
 		e.update(r, int64(len(rs)))
 	}
+	b.seq++
 	return nil
 }
 
@@ -75,6 +77,7 @@ func (b *Buffer) change(r addr, rs []rune) error {
 type Editor struct {
 	buf   *Buffer
 	marks map[rune]addr
+	undo  log
 }
 
 // NewEditor returns a new editor that edits the buffer.
@@ -82,7 +85,11 @@ func (b *Buffer) NewEditor() *Editor {
 	b.lock.Lock()
 	defer b.lock.Unlock()
 
-	ed := &Editor{buf: b, marks: make(map[rune]addr, 2)}
+	ed := &Editor{
+		buf:   b,
+		marks: make(map[rune]addr, 2),
+		undo:  log{runes: runes.NewBuffer(blockSize)},
+	}
 	b.eds = append(b.eds, ed)
 	return ed
 }
@@ -128,6 +135,9 @@ func (ed *Editor) Change(a Address, rs []rune) error {
 
 	r, err := a.addr(ed)
 	if err != nil {
+		return err
+	}
+	if err := ed.undo.push(ed.buf, r, int64(len(rs))); err != nil {
 		return err
 	}
 	if err := ed.buf.change(r, rs); err != nil {
@@ -322,6 +332,45 @@ func (ed *Editor) subMatch(r addr, re *re1.Regexp) ([][2]int64, error) {
 	return m, rs.err
 }
 
+// Undo undoes n changes from the buffer.
+// If there is an error undoing a change,
+// the previously undone changes remain undone,
+// but no more changes are undone
+// and the error is returned.
+func (ed *Editor) Undo(n int) error {
+	for i := 0; i < n; i++ {
+		if err := ed.undo1(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (ed *Editor) undo1() error {
+	t, err := ed.undo.top()
+	if err != nil {
+		return err
+	}
+	for ed.undo.runes.Size() > 0 {
+		switch h, err := ed.undo.top(); {
+		case err != nil:
+			return err
+		case h.seq != t.seq:
+			return nil
+		}
+
+		e, err := ed.undo.pop()
+		if err != nil {
+			return err
+		}
+		if err := ed.buf.change(e.addr, e.runes); err != nil {
+			return err
+		}
+		ed.marks['.'] = addr{e.addr.from, e.addr.from + e.size0}
+	}
+	return nil
+}
+
 // Edit parses a command and performs its edit on the buffer.
 //
 // In the following, text surrounded by / represents delimited text.
@@ -329,12 +378,12 @@ func (ed *Editor) subMatch(r addr, re *re1.Regexp) ([][2]int64, error) {
 // Trailing delimiters may be elided, but the opening delimiter must be present.
 // In delimited text, \ is an escape; the following character is interpreted literally,
 // except \n which represents a literal newline.
-// Items in {} are optional.
+// <addr> represents an optional address. If an address is not given, dot is used.
 //
 // Commands are:
-// 	{addr} a/text/
+// 	<addr> a/text/
 //	or
-//	{addr} a
+//	<addr> a
 //	lines of text
 //	.	Appends after the addressed text.
 //		If an address is not supplied, dot is used.
@@ -349,7 +398,6 @@ func (ed *Editor) subMatch(r addr, re *re1.Regexp) ([][2]int64, error) {
 //		Dot is set to the address.
 //	{addr} m {[a-zA-Z]}
 //		Sets the named mark to the address.
-//		If an address is not supplied, dot is used.
 //		If a mark name is not given, dot is set.
 //		Dot is set to the address.
 //	{addr} p
@@ -370,7 +418,23 @@ func (ed *Editor) subMatch(r addr, re *re1.Regexp) ([][2]int64, error) {
 //		then all matches in the address range are substituted.
 //		If an address is not supplied, dot is used.
 //		Dot is set to the modified address.
+//	u [0-9]*
+//		Undoes a series of changes made to the editor.
+//		If the number is not specified, 1 is used.
+//		TODO(eaburns): What is dot set to?
 func (ed *Editor) Edit(cmd []rune) ([]rune, error) {
+	if len(cmd) == 0 {
+		return nil, errors.New("missing command")
+	}
+	switch cmd[0] {
+	case 'u':
+		n, err := ParseInt(cmd[1:])
+		if err != nil {
+			return nil, err
+		}
+		return nil, ed.Undo(n)
+	}
+
 	addr, n, err := Addr(cmd)
 	switch {
 	case err != nil:
@@ -417,6 +481,21 @@ func (ed *Editor) Edit(cmd []rune) ([]rune, error) {
 	default:
 		return nil, errors.New("unknown command: " + string(c))
 	}
+}
+
+// ParseInt parses and returns an integer.
+// If there isn't one then 1 is returned.
+func ParseInt(cmd []rune) (int, error) {
+	var i int
+	for ; i < len(cmd) && unicode.IsSpace(cmd[i]); i++ {
+	}
+	if i == len(cmd) {
+		return 1, nil
+	}
+	cmd = cmd[i:]
+	for ; i < len(cmd) && unicode.IsDigit(cmd[i]); i++ {
+	}
+	return strconv.Atoi(string(cmd[:i]))
 }
 
 func parseText(cmd []rune) []rune {

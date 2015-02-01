@@ -46,6 +46,14 @@ func (l *log) push(b *Buffer, a addr, n int64) error {
 	return nil
 }
 
+func (l *log) top() (header, error) {
+	from := l.runes.Size() - headerRunes
+	if from < 0 {
+		panic("bad log")
+	}
+	return readHeader(l.runes, l.runes.Size()-headerRunes)
+}
+
 func (l *log) pop() (entry, error) {
 	var e entry
 	var err error
