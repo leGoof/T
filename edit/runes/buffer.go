@@ -93,7 +93,6 @@ func (b *Buffer) Size() int64 { return b.size }
 
 // Rune returns the rune at the given offset.
 // If the rune is out of range it panics.
-// If there is an error reading, it panics a RuneReadError containing the error.
 func (b *Buffer) Rune(offs int64) (rune, error) {
 	if offs < 0 || offs > b.Size() {
 		panic("rune index out of bounds")
@@ -128,7 +127,6 @@ type reader struct {
 // between Read calls on the returned Reader.
 func (b *Buffer) Reader(offs int64) Reader { return &reader{Buffer: b, pos: offs} }
 
-// TODO(eaburns): Deal with a negative offset.
 func (r *reader) Read(p []rune) (int, error) {
 	if r.pos < 0 || r.pos > r.Size() {
 		return 0, os.ErrInvalid
