@@ -120,7 +120,7 @@ type reader struct {
 	pos int64
 }
 
-// Reader returns a reader that reads from the Buffer
+// Reader returns a Reader that reads from the Buffer
 // beginning at the given offset.
 // The returned Reader need not be closed.
 // The Buffer must not be modified
@@ -147,40 +147,66 @@ func (r *reader) Read(p []rune) (int, error) {
 
 // Insert inserts runes into the buffer at the given offset.
 // It is an error to insert at a point than is out of the range of the buffer.
-func (b *Buffer) Insert(rs []rune, offs int64) error {
-	if offs < 0 || offs > b.Size() {
-		return errors.New("invalid offset: " + strconv.FormatInt(offs, 10))
+func (b *Buffer) Insert(p []rune, offs int64) error {
+	_, err := b.Writer(offs).Write(p)
+	return err
+}
+
+// Writer returns a Writer that inserts into the Buffer
+// beginning at the given offset.
+// The returned Writer need not be closed.
+func (b *Buffer) Writer(offs int64) Writer { return &writer{Buffer: b, pos: offs} }
+
+type writer struct {
+	*Buffer
+	pos int64
+}
+
+func (w *writer) Write(p []rune) (n int, err error) {
+	if w.pos < 0 || w.pos > w.Size() {
+		return 0, os.ErrInvalid
 	}
-	for len(rs) > 0 {
-		i, q0 := b.blockAt(offs)
-		blk, err := b.get(i)
+	for len(p) > 0 {
+		var m int
+		m, err = w.write(p)
+		p = p[m:]
+		n += m
 		if err != nil {
-			return err
+			break
 		}
-		m := b.blockSize - blk.n
-		if m == 0 {
-			if i, err = b.insertAt(offs); err != nil {
-				return err
-			}
-			if blk, err = b.get(i); err != nil {
-				return err
-			}
-			q0 = offs
-			m = b.blockSize
-		}
-		if m > len(rs) {
-			m = len(rs)
-		}
-		o := int(offs - q0)
-		copy(b.cache[o+m:], b.cache[o:blk.n])
-		copy(b.cache[o:], rs[:m])
-		b.dirty = true
-		rs = rs[m:]
-		blk.n += m
-		b.size += int64(m)
-		offs += int64(m)
 	}
-	return nil
+	return n, err
+}
+
+// Writer writes to at most one cache block.
+func (w *writer) write(p []rune) (int, error) {
+	i, blkStart := w.blockAt(w.pos)
+	blk, err := w.get(i)
+	if err != nil {
+		return 0, err
+	}
+	n := w.blockSize - blk.n
+	if n == 0 {
+		if i, err = w.insertAt(w.pos); err != nil {
+			return 0, err
+		}
+		if blk, err = w.get(i); err != nil {
+			return 0, err
+		}
+		blkStart = w.pos
+		n = w.blockSize
+	}
+	if n > len(p) {
+		n = len(p)
+	}
+	cacheOffs := int(w.pos - blkStart)
+	copy(w.cache[cacheOffs+n:], w.cache[cacheOffs:blk.n])
+	copy(w.cache[cacheOffs:], p[:n])
+	w.Buffer.dirty = true
+	blk.n += n
+	w.size += int64(n)
+	w.pos += int64(n)
+	return n, nil
 }
 
 // Delete deletes runes from the buffer starting at the given offset.
